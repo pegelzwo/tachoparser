@@ -1,0 +1,46 @@
+name: Build Tachoparser Linux AMD64
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: true
+      - name: Python dependencies for certificate download
+        run: python3 -m pip install --user requests lxml
+      - name: Download official public certificates
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd scripts/pks1 && python3 dl_all_pks1.py)
+          (cd scripts/pks2 && python3 dl_all_pks2.py)
+          test -s internal/pkg/certificates/pks1/EC_PK.bin
+          test -s 'internal/pkg/certificates/pks2/ERCA Gen2 (1) Root Certificate.bin'
+          echo "Gen1 certificates: $(find internal/pkg/certificates/pks1 -name '*.bin' | wc -l)"
+          echo "Gen2 certificates: $(find internal/pkg/certificates/pks2 -name '*.bin' | wc -l)"
+      - name: Download Go modules
+        run: go mod download
+      - name: Compile static Linux AMD64 parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o dist/dddparser ./cmd/dddparser
+          file dist/dddparser
+          sha256sum dist/dddparser > dist/SHA256SUMS
+      - name: Upload compiled parser
+        uses: actions/upload-artifact@v4
+        with:
+          name: tachoparser-linux-amd64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
